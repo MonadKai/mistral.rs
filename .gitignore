@@ -1,3 +1,6 @@
+/worktrees
+.worktrees
+
 /target
 .ruff_cache
 .vscode
