@@ -339,7 +339,7 @@ pub fn rank_document_chunks(
 
     let mut scored: Vec<ScoredChunk> = top_indices
         .iter()
-        .zip(top_embeddings.into_iter())
+        .zip(top_embeddings)
         .map(|(&i, embedding)| {
             let (result_index, ref chunk) = bindings[i];
             let score = cosine_similarity(&query_embedding, &embedding);

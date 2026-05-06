@@ -95,6 +95,10 @@ path = "examples/models/speech/main.rs"
 name = "asr"
 path = "examples/models/asr/main.rs"
 
+[[example]]
+name = "qwen3_asr"
+path = "examples/models/qwen3_asr/main.rs"
+
 # ========== Quantization ==========
 
 [[example]]

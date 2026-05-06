@@ -1,0 +1,6 @@
+Third-party notices
+===================
+
+This branch/worktree incorporates modeling and audio preprocessing code adapted from the
+Apache-2.0-licensed `aha` VoicePlatform reference (`src/models/qwen3_asr/` and shared helpers).
+File-level comments in `mistralrs-core/src/vision_models/qwen3_asr/` identify adapted modules.

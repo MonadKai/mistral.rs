@@ -75,7 +75,10 @@ use crate::vision_models::qwen3_vl_moe::{
 };
 use crate::vision_models::voxtral::config::VoxtralConfig;
 use crate::vision_models::voxtral::{VoxtralModel, VoxtralProcessor};
-use crate::vision_models::{minicpmo, phi4};
+use crate::vision_models::{
+    minicpmo, phi4,
+    qwen3_asr::{Qwen3ASRConfig, Qwen3AsrModel, Qwen3AsrProcessor, WhisperPreprocessorConfig},
+};
 
 pub trait MultimodalModel: IsqModel + AnyMoeBaseModelMixin {
     // pixel_values and pixel_attention_mask only specified for prompt seqs
@@ -220,6 +223,8 @@ pub enum MultimodalLoaderType {
     Voxtral,
     #[serde(rename = "gemma4")]
     Gemma4,
+    #[serde(rename = "qwen3_asr")]
+    Qwen3Asr,
 }
 
 // https://github.com/huggingface/transformers/blob/cff06aac6fad28019930be03f5d467055bf62177/src/transformers/models/auto/modeling_auto.py#L448
@@ -247,6 +252,7 @@ impl MultimodalLoaderType {
             "Qwen3_5MoeForConditionalGeneration" => Ok(Self::Qwen3_5Moe),
             "VoxtralForConditionalGeneration"
             | "VoxtralRealtimeForConditionalGeneration" => Ok(Self::Voxtral),
+            "Qwen3ASRForConditionalGeneration" => Ok(Self::Qwen3Asr),
             other => anyhow::bail!(
                 "Unsupported Hugging Face Transformers -CausalLM model class `{other}`. Please raise an issue."
             ),
@@ -278,7 +284,8 @@ impl FromStr for MultimodalLoaderType {
             "qwen3_5" => Ok(Self::Qwen3_5),
             "qwen3_5moe" => Ok(Self::Qwen3_5Moe),
             "voxtral" => Ok(Self::Voxtral),
-            a => Err(format!("Unknown architecture `{a}`. Possible architectures: `phi3v`, `idefics2`, `llava_next`, `llava`, `vllama`, `qwen2vl`, `idefics3`, `minicpmo`, `phi4mm`, `qwen2_5vl`, `gemma3`, `mistral3`, `llama4`, `gemma3n`, `gemma4`, `qwen3vl`, `qwen3vlmoe`, `qwen3_5`, `qwen3_5moe`, `voxtral`.")),
+            "qwen3_asr" => Ok(Self::Qwen3Asr),
+            a => Err(format!("Unknown architecture `{a}`. Possible architectures: `phi3v`, `idefics2`, `llava_next`, `llava`, `vllama`, `qwen2vl`, `idefics3`, `minicpmo`, `phi4mm`, `qwen2_5vl`, `gemma3`, `mistral3`, `llama4`, `gemma3n`, `gemma4`, `qwen3vl`, `qwen3vlmoe`, `qwen3_5`, `qwen3_5moe`, `voxtral`, `qwen3_asr`.")),
         }
     }
 }
@@ -306,6 +313,7 @@ impl std::fmt::Display for MultimodalLoaderType {
             MultimodalLoaderType::Qwen3_5Moe => "qwen3_5moe",
             MultimodalLoaderType::Voxtral => "voxtral",
             MultimodalLoaderType::Gemma4 => "gemma4",
+            MultimodalLoaderType::Qwen3Asr => "qwen3_asr",
         };
         write!(f, "{name}")
     }
@@ -364,6 +372,7 @@ impl AutoMultimodalLoader {
             MultimodalLoaderType::Qwen3_5Moe => Box::new(Qwen3_5MoeLoader),
             MultimodalLoaderType::Voxtral => Box::new(VoxtralLoader),
             MultimodalLoaderType::Gemma4 => Box::new(Gemma4Loader),
+            MultimodalLoaderType::Qwen3Asr => Box::new(Qwen3AsrLoader),
         })
     }
 }
@@ -7260,6 +7269,201 @@ impl DeviceMappedModelLoader for VoxtralLoader {
         };
 
         Ok(Box::new(cfg))
+    }
+}
+
+// ─── Qwen3-ASR ───────────────────────────────────────────────────────────────
+
+/// [`MultimodalLoader`] for Qwen3-ASR (`Qwen3ASRForConditionalGeneration`).
+pub struct Qwen3AsrLoader;
+
+pub struct Qwen3AsrPrefixer;
+
+impl MultimodalPromptPrefixer for Qwen3AsrPrefixer {
+    fn prefix_image(&self, _image_indexes: Vec<usize>, prompt: &str) -> String {
+        prompt.to_string()
+    }
+}
+
+impl MultimodalModelLoader for Qwen3AsrLoader {
+    fn load(
+        &self,
+        config: &str,
+        vb: ShardedVarBuilder,
+        normal_loading_metadata: NormalLoadingMetadata,
+        attention_mechanism: AttentionImplementation,
+    ) -> Result<Box<dyn MultimodalModel + Send + Sync>> {
+        let cfg: Qwen3ASRConfig = serde_json::from_str(config)?;
+        Ok(Box::new(Qwen3AsrModel::new(
+            &cfg,
+            vb,
+            normal_loading_metadata,
+            attention_mechanism,
+        )?))
+    }
+    fn is_gptx(&self, _config: &str) -> bool {
+        true
+    }
+    fn get_config_repr(&self, config: &str) -> Result<Box<dyn Debug>> {
+        let cfg: Qwen3ASRConfig = serde_json::from_str(config)?;
+        Ok(Box::new(cfg))
+    }
+    fn get_processor(
+        &self,
+        model_config: &str,
+        _processor_config: Option<ProcessorConfig>,
+        preprocessor_config: PreProcessorConfig,
+        _max_edge: Option<u32>,
+    ) -> Arc<dyn Processor + Send + Sync> {
+        let cfg: Qwen3ASRConfig =
+            serde_json::from_str(model_config).expect("Failed to parse Qwen3ASRConfig");
+        let whisper_cfg = WhisperPreprocessorConfig::try_from_preprocessor(&preprocessor_config)
+            .expect("Failed to parse WhisperPreprocessorConfig from preprocessor_config.json");
+        Arc::new(
+            Qwen3AsrProcessor::new(&cfg, &whisper_cfg, &Device::Cpu)
+                .expect("Failed to build Qwen3AsrProcessor"),
+        )
+    }
+    fn supports_paged_attention(&self, _config: &str) -> bool {
+        false
+    }
+    fn supports_prefix_cacher(&self, _config: &str) -> bool {
+        false
+    }
+    fn prefixer(&self, _config: &str) -> Arc<dyn MultimodalPromptPrefixer> {
+        Arc::new(Qwen3AsrPrefixer)
+    }
+    fn modalities(&self, _config: &str) -> Result<Modalities> {
+        Ok(Modalities {
+            input: vec![SupportedModality::Text, SupportedModality::Audio],
+            output: vec![SupportedModality::Text],
+        })
+    }
+}
+
+impl IsqModelLoader for Qwen3AsrLoader {
+    fn isq_layer_regexes(&self, _config: &str) -> Result<Vec<Regex>> {
+        Ok(vec![
+            Regex::new(r"thinker\.lm_head\.(weight|bias)$")?,
+            Regex::new(
+                r"thinker\.model\.layers\.(\d+)\.self_attn\.(q|k|v|o)_proj\.(weight|bias)$",
+            )?,
+            Regex::new(r"thinker\.model\.layers\.(\d+)\.mlp\.(gate|up|down)_proj\.(weight|bias)$")?,
+            Regex::new(
+                r"thinker\.model\.layers\.(\d+)\.(input|post_attention)_layernorm\.(weight)$",
+            )?,
+        ])
+    }
+    fn immediate_isq_predicates(&self, config: &str) -> Result<Vec<Regex>> {
+        self.isq_layer_regexes(config)
+    }
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+impl DeviceMappedModelLoader for Qwen3AsrLoader {
+    fn mapped_max_act_size_elems(
+        &self,
+        config: &str,
+        params: &AutoDeviceMapParams,
+    ) -> Result<usize> {
+        let AutoDeviceMapParams::Multimodal {
+            max_seq_len,
+            max_batch_size,
+            ..
+        } = params
+        else {
+            anyhow::bail!("Expected multimodal AutoDeviceMapParams for this model!")
+        };
+
+        let cfg: Qwen3ASRConfig = serde_json::from_str(config)?;
+        let text = &cfg.thinker_config.text_config;
+        let max_audio_tokens = 2048usize;
+        let total_seq = max_audio_tokens + *max_seq_len.min(&ATTENTION_CHUNK_SIZE);
+        Ok(max_batch_size * text.num_attention_heads * total_seq * total_seq)
+    }
+
+    fn non_mapped_max_act_size_elems(
+        &self,
+        config: &str,
+        params: &AutoDeviceMapParams,
+    ) -> Result<usize> {
+        let AutoDeviceMapParams::Multimodal { max_batch_size, .. } = params else {
+            anyhow::bail!("Expected multimodal AutoDeviceMapParams for this model!")
+        };
+
+        let cfg: Qwen3ASRConfig = serde_json::from_str(config)?;
+        let ac = &cfg.thinker_config.audio_config;
+        let max_enc_seq = 3000usize;
+        Ok(max_batch_size * ac.encoder_attention_heads * max_enc_seq * max_enc_seq)
+    }
+
+    fn non_mapped_size_in_bytes(
+        &self,
+        config: &str,
+        dtype: DType,
+        weight_pack_factor: usize,
+        _matformer_config: Option<&MatformerSliceConfig>,
+    ) -> Result<usize> {
+        let cfg: Qwen3ASRConfig = serde_json::from_str(config)?;
+        let ac = &cfg.thinker_config.audio_config;
+        let elem = dtype.size_in_bytes();
+        let wf = weight_pack_factor.max(1);
+        let enc_stack = ac.encoder_layers
+            * (8usize * ac.d_model * ac.d_model + 2 * ac.d_model * ac.encoder_ffn_dim);
+        let conv_stack = ac.d_model * ac.num_mel_bins * 256;
+        Ok((enc_stack + conv_stack) * elem / wf)
+    }
+
+    fn layer_sizes_in_bytes(
+        &self,
+        config: &str,
+        dtype: DType,
+        weight_pack_factor: usize,
+        _matformer_config: Option<&MatformerSliceConfig>,
+    ) -> Result<Vec<usize>> {
+        let cfg: Qwen3ASRConfig = serde_json::from_str(config)?;
+        let text = &cfg.thinker_config.text_config;
+        let elem = dtype.size_in_bytes();
+        let wf = weight_pack_factor.max(1);
+
+        let head_dim = text.head_dim;
+        let q = text.hidden_size * text.num_attention_heads * head_dim;
+        let kv = 2 * text.hidden_size * text.num_key_value_heads * head_dim;
+        let o = text.num_attention_heads * head_dim * text.hidden_size;
+        let attn = (q + kv + o) / wf;
+
+        let mlp = (text.hidden_size * text.intermediate_size * 2
+            + text.intermediate_size * text.hidden_size)
+            / wf;
+        let norms = 2 * text.hidden_size;
+
+        let per_layer = (attn + mlp + norms) * elem;
+        Ok(vec![per_layer; text.num_hidden_layers])
+    }
+
+    fn num_layers(&self, config: &str) -> Result<usize> {
+        let cfg: Qwen3ASRConfig = serde_json::from_str(config)?;
+        Ok(cfg.thinker_config.text_config.num_hidden_layers)
+    }
+
+    fn model_config(&self, config: &str) -> Result<Box<dyn ModelConfigLike>> {
+        let cfg: Qwen3ASRConfig = serde_json::from_str(config)?;
+        let text = &cfg.thinker_config.text_config;
+        Ok(Box::new(ModelConfigMetadata {
+            max_seq_len: text.max_position_embeddings,
+            num_layers: text.num_hidden_layers,
+            hidden_size: text.hidden_size,
+            num_kv_heads: text.num_key_value_heads,
+            num_attn_heads: text.num_attention_heads,
+            sliding_window: None,
+            k_head_dim: text.head_dim,
+            v_head_dim: text.head_dim,
+            kv_cache_layout: crate::paged_attention::KvCacheLayout::Standard,
+        }))
+    }
+
+    fn non_mapped_sub_models(&self) -> Option<Vec<NonMappedSubModel>> {
+        Some(vec![NonMappedSubModel::Audio])
     }
 }
 

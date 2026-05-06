@@ -62,6 +62,10 @@ pub struct PreProcessorConfig {
 
     // Audio feature extraction configuration
     pub(crate) dither: Option<f64>,
+    /// Whisper / Qwen3-ASR `n_fft` (alias of `fft_length` in some configs).
+    pub(crate) n_fft: Option<usize>,
+    pub(crate) chunk_length: Option<f32>,
+    pub(crate) feature_extractor_type: Option<String>,
     pub(crate) feature_size: Option<usize>,
     pub(crate) fft_length: Option<usize>,
     pub(crate) fft_overdrive: Option<bool>,

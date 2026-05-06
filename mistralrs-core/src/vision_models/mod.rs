@@ -30,6 +30,7 @@ pub(crate) mod llama4;
 pub(crate) mod mistral3;
 pub(crate) mod qwen3_5;
 pub(crate) mod qwen3_5_moe;
+pub(crate) mod qwen3_asr;
 pub(crate) mod qwen3_vl;
 pub(crate) mod qwen3_vl_moe;
 pub(crate) mod siglip;

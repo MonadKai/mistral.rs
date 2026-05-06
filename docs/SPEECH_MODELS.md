@@ -5,4 +5,5 @@ Mistral.rs supports various modalities of models, including speech models. Speec
 Please see docs for the following model types:
 
 - Voxtral (ASR/speech-to-text): [VOXTRAL.md](VOXTRAL.md)
+- Qwen3-ASR (ASR/speech-to-text): [QWEN3_ASR.md](QWEN3_ASR.md)
 - Dia (text-to-speech): [DIA.md](DIA.md)
